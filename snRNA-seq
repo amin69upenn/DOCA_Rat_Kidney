@@ -26,9 +26,9 @@ bcmvn_kidney <- find.pK(sweep.stats_kidney) #determine the pk
 nExp_poi <- round(0.15*nrow(Control1.S@meta.data)) 
 Control1.S <- doubletFinder_v3(seu_kidney, PCs = 1:30, pN = 0.25, pK = #depends on the previous sterp, nExp = nExp_poi, reuse.pANN = FALSE, sct = FALSE)
 Control1.S.Filtered <- subset(Control1.S, subset = #Doublet_related_column == "singlet")                                 
-#Do it for all samples
+#Do this step for all 22 samples
 #============================Merge Datssets======================================================#
-Rat_SN_RNA = merge (Control1.S.Filtered, y = c (#All other sc filtered objects))
+Rat_SN_RNA = merge (Control1.S.Filtered, y = c (#All 22 sn filtered objects))
 
 #============================Add percent.mt to dataset======================================================#
 Rat_SN_RNA[["percent.mt"]] <- PercentageFeatureSet(Rat_SN_RNA, pattern = "^mt-")
