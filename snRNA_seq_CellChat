@@ -1,0 +1,28 @@
+# DOCA_Rat_Kidney
+#-----------------CellChat for All Samples--------------------------#
+library (Seurat)
+library (dplyr)
+library (ggplot2)
+library (harmony)
+library (patchwork)
+library (CellChat)
+options(stringsAsFactors = FALSE)
+Rat.All = readRDS ("Rat.RNA.Idents.10.1.2022.rds")
+Rat.All[["Idents"]] <- Idents(object = Rat.All)
+cellchat <- createCellChat(object = Rat.All)
+CellChatDB <- CellChatDB.mouse
+CellChatDB.use <- CellChatDB 
+cellchat@DB <- CellChatDB.use
+cellchat <- subsetData(cellchat)
+future::plan("multiprocess", workers = 4)
+options(future.globals.maxSize= 4000000000)
+cellchat <- identifyOverExpressedGenes(cellchat)
+cellchat <- identifyOverExpressedInteractions(cellchat)
+cellchat <- projectData(cellchat, PPI.human)
+cellchat <- computeCommunProb(cellchat)
+cellchat <- filterCommunication(cellchat, min.cells = 10)
+df.net <- subsetCommunication(cellchat)
+write.csv (df.net, file = "cellchat.Rat.All.10.9.csv")
+cellchat <- computeCommunProbPathway(cellchat)
+cellchat <- aggregateNet(cellchat)
+saveRDS (cellchat, file = "cellchat.Rat.All.10.9.rds")
