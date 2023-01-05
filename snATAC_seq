@@ -1,54 +1,59 @@
 # DOCA_Rat_Kidney
-library (Seurat)
+library (Signac)
+library(Seurat)
 library (dplyr)
-library (ggplot2)
+library(ggplot2)
 library (harmony)
 library (patchwork)
-library (SoupX)
-library (DoubletFinder)
+library (EnsDb.Hsapiens.v86)
+library(rtracklayer)
+#--------------------------Prepare Object---------------------------------#
 
-#================================Ambient RNA Correction===============================#
-Control1 = load10X('path/to/your/cellranger/outs/folder')
-Control1 = autoEstCont(Control1)
-Control1 = adjustCounts(Control1)
-#Do it for all samples
-#================================Doublet Removal===============================#
-Control1.S <- CreateSeuratObject(counts = Control1, project = "Control1", min.cells = 3, min.features = 300) # create Seurat object
-Control1.S <- NormalizeData(Control1.S)
-Control1.S <- FindVariableFeatures(Control1.S, selection.method = "vst", nfeatures = 2000)
-Control1.S <- ScaleData(Control1.S)
-Control1.S <- RunPCA(Control1.S)
-Control1.S <- RunUMAP(Control1.S, dims = 1:30)
-sweep.res.list_kidney <- paramSweep_v3(Control1.S, PCs = 1:30, sct = FALSE)
-sweep.stats_kidney <- summarizeSweep(sweep.res.list_kidney, GT = FALSE)
-bcmvn_kidney <- find.pK(sweep.stats_kidney) #determine the pk
-nExp_poi <- round(0.075*nrow(Control1.S@meta.data)) 
-Control1.S <- doubletFinder_v3(seu_kidney, PCs = 1:30, pN = 0.25, pK = #depends on the previous sterp, nExp = nExp_poi, reuse.pANN = FALSE, sct = FALSE)
-Control1.S.Filtered <- subset(Control1.S, subset = #Doublet_related_column == "singlet")                                 
-#Do it for all samples
-#============================Merge Datssets======================================================#
-HK_SN_RNA = merge (Control1.S.Filtered, y = c (#All other sc filtered objects))
+annotation <- GetGRangesFromEnsDb(ensdb = EnsDb.Rnorvegicus.v79)
+genome(annotation) <- "rn6"
+seqlevelsStyle(annotation) <- "UCSC"
+rn6 <- import("/home/amin69/Reference/rn6/genes/genes.gtf.gz")
+genome(rn6) <- "rn6"
+seqlevelsStyle(rn6) <- "UCSC"
+rn6$gene_biotype <- rn6$gene_type
+counts <- Read10X_h5(filename = "/Your_Path/filtered_peak_bc_matrix.h5")
+metadata <- read.csv(file = "/Your_Path/singlecell.csv", header = TRUE,row.names = 1)
+fragpath <- "/Your_Path/outs/fragments.tsv.gz"
+chromatin.assay <- CreateChromatinAssay(counts = counts, sep = c(":", "-"),fragments = fragpath,annotation = annotation)
+Control1.S <- CreateSeuratObject(counts = chromatin.assay,assay = "peaks",meta.data = metadata)
 
-#============================Add percent.mt to dataset======================================================#
-HK_SN_RNA[["percent.mt"]] <- PercentageFeatureSet(HK_SN_RNA, pattern = "^MT-")
-
-#============================Pre Processing======================================================#
-HK_SN_RNA <- subset(HK_SN_RNA, subset = nFeature_RNA > 200 & nFeature_RNA < 3000 & percent.mt < 50)
-
-HK_SN_RNA <- FindVariableFeatures(object = HK_SN_RNA,selection.method = "vst")
-HK_SN_RNA <- NormalizeData(HK_SN_RNA)
-HK_SN_RNA <- ScaleData(HK_SN_RNA, vars.to.regress = c ("nCount_RNA", "percent.mt"))
-HK_SN_RNA <- RunPCA(HK_SN_RNA, assay = 'RNA', npcs = 50, features = VariableFeatures(object = HK_SN_RNA), 
-                              verbose = TRUE, ndims.print = 1:5, nfeatures.print = 10)
-
-#============= Run Harmony =============
-HK_SN_RNA <- RunHarmony(HK_SN_RNA, group.by.vars = "orig.ident")
-HK_SN_RNA <- RunUMAP(HK_SN_RNA, reduction = "harmony", dims = 1:50)
-HK_SN_RNA <- FindNeighbors(HK_SN_RNA, reduction = "harmony", dims = 1:50) %>% FindClusters()				   
-DimPlot(HK_SN_RNA, reduction = "umap", label = TRUE, pt.size = 0.5) + NoLegend()
-
-#================================== DEG List==============================#
-HK_SN_RNA.Markers <- FindAllMarkers(HK_SN_RNA, only.pos = TRUE, logfc.threshold = 0.25)
-
-#==================================Remove Clusters with DEGs indicate several cell types as doublets ==============================#
-doca.rats.integrated <- subset(doca.rats.integrated, idents = c (17,22, 41), invert = TRUE)
+#Annotation
+Annotation(Control1.S) <- rn6
+#QC Filtering
+Control1.S <- NucleosomeSignal(object = Control1.S)
+Control1.S <- TSSEnrichment(Control1.S, fast = FALSE)
+Control1.S$pct_reads_in_peaks <- Control1.S$peak_region_fragments / Control1.S$passed_filters * 100
+Control1.S$blacklist_ratio <- Control1.S$blacklist_region_fragments / Control1.S$peak_region_fragments
+Control1.S$high.tss <- ifelse(Control1.S$TSS.enrichment > 2, 'High', 'Low')
+pdf("Viloin.HK.Fetal.Mito.pdf", width=6, height=4)
+TSSPlot(Control1.S, group.by = 'high.tss') + NoLegend()
+Control1.S$nucleosome_group <- ifelse(Control1.S$nucleosome_signal > 4, 'NS > 4', 'NS < 4')
+FragmentHistogram(object = Control1.S, group.by = 'nucleosome_group')
+pdf("HK2481_1.ATAC.QC.pdf", width=18, height=4)
+VlnPlot(object = Control1.S, features = c('pct_reads_in_peaks', 'peak_region_fragments', 'TSS.enrichment', 'blacklist_ratio', 'nucleosome_signal'), pt.size = 0.1, ncol = 5)
+#Do this step for all 22 samples
+#--------------------------Merge Datasets---------------------------------#
+Rat.SN.RNA = merge (x = Control1.S, y = list(#list of all 8 other objects))
+#--------------------------Filtering---------------------------------#
+Rat.SN.RNA <- subset(x = Rat.SN.RNA, subset = peak_region_fragments > 3000 & peak_region_fragments < 20000 & pct_reads_in_peaks > 15 & blacklist_ratio < 0.05 & nucleosome_signal < 4 & TSS.enrichment > 2)
+#--------------------------Pre-processing---------------------------------#  
+Rat.SN.RNA <- RunTFIDF(Rat.SN.RNA)
+Rat.SN.RNA <- FindTopFeatures(Rat.SN.RNA, min.cutoff = 'q0')
+Rat.SN.RNA <- RunSVD(Rat.SN.RNA)
+Rat.SN.RNA <- RunHarmony(
+  object = Rat.SN.RNA,
+  group.by.vars = 'dataset',
+  reduction = 'lsi',
+  assay.use = 'peaks',
+  project.dim = FALSE
+)
+Rat.SN.RNA <- RunUMAP(Rat.SN.RNA, dims = 2:30, reduction = 'harmony')
+Rat.SN.RNA <- RunUMAP(Rat.SN.RNA, reduction = "harmony", dims = 2:30)
+Rat.SN.RNA <- FindNeighbors(Rat.SN.RNA, reduction = "harmony", dims = 2:30) %>% FindClusters()
+#--------------------------DAR---------------------------------#
+DARs <- FindAllMarkers(object = Rat.SN.RNA, min.pct = 0.05, test.use = 'LR', latent.vars = 'peak_region_fragments')
